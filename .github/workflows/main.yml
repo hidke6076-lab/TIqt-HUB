@@ -1,9 +1,9 @@
--- aveh aimbot v12 — delta android
-print("[Aveh] init...")
+-- aveh aimbot v11 — android / delta
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local SoundService     = game:GetService("SoundService")
+local ContentProvider  = game:GetService("ContentProvider")
 
 local LP = Players.LocalPlayer
 local PG = LP:WaitForChild("PlayerGui")
@@ -14,11 +14,10 @@ local function getHum() local c=getChar() return c and c:FindFirstChildOfClass("
 local isTouch = UserInputService.TouchEnabled
 
 for _, n in ipairs({"AvehAimbot", "AvehFovGui"}) do
-    local g = PG:FindFirstChild(n); if g then pcall(function() g:Destroy() end) end
+    local g = PG:FindFirstChild(n); if g then g:Destroy() end
 end
 if _G.AvehAimbotCleanup then pcall(_G.AvehAimbotCleanup) end
 pcall(function() RunService:UnbindFromRenderStep("AvehAimLoop") end)
-print("[Aveh] cleanup ok")
 
 local track = {}
 local function addTrack(t, c) table.insert(t, c); return c end
@@ -145,7 +144,7 @@ local STR = {
 }
 
 -- ============================================================
--- FOV CIRCLE
+-- FOV CIRCLE и слой ESP
 -- ============================================================
 local fovGui = Instance.new("ScreenGui")
 fovGui.Name = "AvehFovGui"
@@ -179,8 +178,6 @@ local function updateFovCircle(dt)
     fovStroke.Color = accent
     fovStroke.Thickness = 1.6 + math.sin(fovPulse)*0.4
 end
-
-print("[Aveh] fov ok")
 
 -- ============================================================
 -- AIM
@@ -328,26 +325,26 @@ local MODES = {
                 body=Color3.fromRGB(180,25,0),    mat=Enum.Material.Neon, fillT=0.05, outlineT=0 },
 }
 
-local bodySnapshots = {}
+_G._avehBody = setmetatable({}, {__mode = "k"})
 local function snapshotBody(char)
-    if bodySnapshots[char] then return end
+    if _G._avehBody[char] then return end
     local snap = {}
     for _, p in ipairs(char:GetChildren()) do
         if p:IsA("BasePart") then
             table.insert(snap, { part=p, color=p.Color, material=p.Material })
         end
     end
-    bodySnapshots[char] = snap
+    _G._avehBody[char] = snap
 end
 local function restoreBody(char)
-    local snap = bodySnapshots[char]; if not snap then return end
+    local snap = _G._avehBody and _G._avehBody[char]; if not snap then return end
     for _, e in ipairs(snap) do
         if e.part and e.part.Parent then
             pcall(function() e.part.Color = e.color end)
             pcall(function() e.part.Material = e.material end)
         end
     end
-    bodySnapshots[char] = nil
+    _G._avehBody[char] = nil
 end
 local function applyBodyMode(char, mode, rainbowCol)
     local cfg = MODES[mode]
@@ -439,7 +436,7 @@ local function updateHealthBar(hb, hum)
 end
 
 -- ============================================================
--- BOX / SKELETON
+-- BOX и SKELETON
 -- ============================================================
 local SKELETON_R15 = {
     {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
@@ -452,6 +449,7 @@ local SKELETON_R6 = {
     {"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},
     {"Torso","Left Leg"},{"Torso","Right Leg"},
 }
+
 local function mkLineFrame()
     local f = Instance.new("Frame")
     f.AnchorPoint = Vector2.new(0.5,0.5)
@@ -473,13 +471,15 @@ local function mkBoxFrame()
     f.BackgroundTransparency = 1; f.BorderSizePixel = 0
     f.Visible = false; f.Parent = espLayer
     local s = Instance.new("UIStroke", f)
-    s.Thickness = 1.6
+    s.Thickness = 1.6; s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     return f, s
 end
+
 local function hideOverlay(entry)
     if entry.box then entry.box.Visible = false end
     if entry.skel then for _, l in pairs(entry.skel) do l.Visible = false end end
 end
+
 local function updateOverlay(entry, char, hrp, color)
     if not C.ESPBox and not C.ESPSkeleton then hideOverlay(entry); return end
     local c = cam()
@@ -526,6 +526,7 @@ end
 -- ESP УПРАВЛЕНИЕ
 -- ============================================================
 local function safeDestroy(o) if o then pcall(function() o:Destroy() end) end end
+
 local function clearESP(plr)
     local e = espTracked[plr]; if not e then return end
     if e.char then restoreBody(e.char) end
@@ -535,6 +536,7 @@ local function clearESP(plr)
     if e.skel then for _, l in pairs(e.skel) do safeDestroy(l) end end
     espTracked[plr] = nil
 end
+
 local function ensureESP(plr, char, hrp)
     local entry = espTracked[plr]
     if entry and entry.char ~= char then clearESP(plr); entry = nil end
@@ -558,6 +560,7 @@ local function ensureESP(plr, char, hrp)
     end
     return entry
 end
+
 local function updateOne(plr, rainbowCol, accent)
     local char = plr.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -572,6 +575,7 @@ local function updateOne(plr, rainbowCol, accent)
     if C.ESPMode == "glow" and entry.light then
         entry.light.Brightness = 2.2 + math.sin(hue*math.pi*6)*0.6
     end
+
     if C.ESPHealth then
         if not (entry.health and entry.health.billboard.Parent == hrp) then
             if entry.health then safeDestroy(entry.health.billboard) end
@@ -582,10 +586,13 @@ local function updateOne(plr, rainbowCol, accent)
         safeDestroy(entry.health.billboard)
         entry.health = nil
     end
+
     local color = (C.ESPMode == "rainbow") and rainbowCol or accent
     updateOverlay(entry, char, hrp, color)
 end
+
 local function updateESP(dt)
+    -- список на удаление без мутации во время итерации
     local toRemove = nil
     for plr in pairs(espTracked) do
         if not plr.Parent then
@@ -593,7 +600,9 @@ local function updateESP(dt)
             table.insert(toRemove, plr)
         end
     end
-    if toRemove then for _, plr in ipairs(toRemove) do clearESP(plr) end end
+    if toRemove then
+        for _, plr in ipairs(toRemove) do clearESP(plr) end
+    end
 
     if not C.ESP then
         local all = {}
@@ -605,12 +614,12 @@ local function updateESP(dt)
     local rainbowCol = Color3.fromHSV(hue, 0.9, 1)
     local accent = getAccent()
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LP then pcall(updateOne, plr, rainbowCol, accent) end
+        if plr ~= LP then
+            pcall(updateOne, plr, rainbowCol, accent)
+        end
     end
 end
 addTrack(track, Players.PlayerRemoving:Connect(function(plr) clearESP(plr) end))
-
-print("[Aveh] esp ok")
 
 -- ============================================================
 -- NOCLIP
@@ -626,7 +635,7 @@ addTrack(track, RunService.Stepped:Connect(function()
 end))
 
 -- ============================================================
--- FLY
+-- FLY + AURA + ANIM + TILT
 -- ============================================================
 local flyBV = nil
 local function ensureFlyBV()
@@ -704,6 +713,7 @@ local function ensureFlyAura()
 end
 
 local flyAnimTrack, flyAnimChar, flyAnimLoading = nil, nil, false
+
 local function stopFlyAnim()
     if flyAnimTrack then
         pcall(function() flyAnimTrack:Stop(0.15) end)
@@ -711,9 +721,12 @@ local function stopFlyAnim()
     end
     flyAnimChar = nil
 end
+
 local function tryPlayAnim(hum, animId)
     local anim = Instance.new("Animation")
     anim.AnimationId = "rbxassetid://" .. tostring(animId)
+    pcall(function() ContentProvider:PreloadAsync({anim}) end)
+
     local animator = hum:FindFirstChildOfClass("Animator")
     if not animator then
         animator = Instance.new("Animator")
@@ -724,19 +737,21 @@ local function tryPlayAnim(hum, animId)
         trackA.Priority = Enum.AnimationPriority.Action4
         trackA.Looped = true
         pcall(function() trackA:Play(0.1) end)
-        task.wait(0.2)
+        task.wait(0.3)
         if trackA.IsPlaying then return trackA end
     end
+
     local ok2, trackB = pcall(function() return hum:LoadAnimation(anim) end)
     if ok2 and trackB then
         trackB.Priority = Enum.AnimationPriority.Action4
         trackB.Looped = true
         pcall(function() trackB:Play(0.1) end)
-        task.wait(0.2)
+        task.wait(0.3)
         if trackB.IsPlaying then return trackB end
     end
     return nil
 end
+
 local function ensureFlyAnim()
     local char = getChar(); if not char then stopFlyAnim(); return end
     if flyAnimLoading then return end
@@ -760,6 +775,7 @@ local function ensureFlyAnim()
         flyAnimLoading = false
     end)
 end
+
 local function applyFlyTilt(dt)
     if not C.FlyTilt or not C.Fly then return end
     local char = getChar(); if not char then return end
@@ -838,8 +854,6 @@ addTrack(track, RunService.Heartbeat:Connect(function(dt)
     end
 end))
 
-print("[Aveh] fly/music ok")
-
 -- ============================================================
 -- UI
 -- ============================================================
@@ -850,7 +864,7 @@ local uiConnections = {}
 local function destroyUI()
     for _, c in ipairs(uiConnections) do pcall(function() c:Disconnect() end) end
     uiConnections = {}
-    if gui then pcall(function() gui:Destroy() end); gui = nil end
+    if gui then gui:Destroy(); gui = nil end
     aimBtnRef = nil; previewRef = nil
 end
 
@@ -886,14 +900,17 @@ local function applyPreviewMode(model, mode)
     if oldH then oldH:Destroy() end
     local oldL = model:FindFirstChild("AvehPreviewLight")
     if oldL then oldL:Destroy() end
+
     local cfg = MODES[mode]
     if not cfg then return end
+
     for _, p in ipairs(model:GetChildren()) do
         if p:IsA("BasePart") then
             p.Color = Color3.fromRGB(200,200,215)
             p.Material = Enum.Material.SmoothPlastic
         end
     end
+
     local h = Instance.new("Highlight")
     h.Adornee = model
     h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
@@ -902,6 +919,7 @@ local function applyPreviewMode(model, mode)
     h.FillTransparency = cfg.fillT
     h.OutlineTransparency = cfg.outlineT
     h.Parent = model
+
     if cfg.body then
         for _, p in ipairs(model:GetChildren()) do
             if p:IsA("BasePart") then
@@ -910,6 +928,7 @@ local function applyPreviewMode(model, mode)
             end
         end
     end
+
     local l = Instance.new("PointLight")
     l.Name = "AvehPreviewLight"
     l.Color = cfg.light or Color3.fromRGB(255,60,60)
@@ -1445,6 +1464,54 @@ local function buildUI()
         button(S.size_reset, function() state.scale = 1.00; buildUI() end)
     end
 
+    -- снег
+    do
+        local W0, H0 = math.floor(winW), math.floor(winH)
+        local snowColor = (state.theme == "dark") and Color3.fromRGB(255,255,255) or Color3.fromRGB(110,165,225)
+        local layer = Instance.new("Frame")
+        layer.Name = "Snow"
+        layer.Size = UDim2.new(1,0,1,0)
+        layer.BackgroundTransparency = 1; layer.BorderSizePixel = 0
+        layer.Active = false; layer.ZIndex = 20; layer.ClipsDescendants = true
+        layer.Parent = Main
+
+        local flakes = {}
+        local function resetFlake(f, initial)
+            f.size = (1.5 + math.random()*3.5) * SF
+            f.x = math.random()*W0
+            f.y = initial and math.random()*H0 or -f.size - math.random()*40
+            f.speed = (16 + f.size*8 + math.random()*12)
+            f.amp = 5 + math.random()*12
+            f.freq = 0.6 + math.random()*1.3
+            f.phase = math.random()*math.pi*2
+            f.gui.Size = UDim2.fromOffset(f.size, f.size)
+        end
+        for i = 1, 40 do
+            local fr = Instance.new("Frame")
+            fr.BackgroundColor3 = snowColor
+            fr.BackgroundTransparency = 0.15 + math.random()*0.45
+            fr.BorderSizePixel = 0; fr.Active = false; fr.ZIndex = 21
+            Instance.new("UICorner", fr).CornerRadius = UDim.new(1,0)
+            fr.Parent = layer
+            local f = { gui = fr }
+            resetFlake(f, true)
+            flakes[i] = f
+        end
+
+        local snowT = 0
+        addTrack(uiConnections, RunService.RenderStepped:Connect(function(dt)
+            if not Main.Visible then return end
+            dt = math.min(dt, 0.1)
+            snowT = snowT + dt
+            for _, f in ipairs(flakes) do
+                f.y = f.y + f.speed * dt
+                if f.y > H0 + 4 then resetFlake(f, false) end
+                local x = f.x + math.sin(snowT*f.freq + f.phase) * f.amp
+                f.gui.Position = UDim2.fromOffset(x, f.y)
+            end
+        end))
+    end
+
     do
         local dragging, dragStart, startOffset = false, nil, nil
         Title.InputBegan:Connect(function(i)
@@ -1573,8 +1640,6 @@ local function buildUI()
     end))
 end
 
-print("[Aveh] buildUI ok")
-
 -- ============================================================
 -- РЕНДЕР
 -- ============================================================
@@ -1620,21 +1685,13 @@ _G.AvehAimbotCleanup = function()
     local all = {}
     for plr in pairs(espTracked) do table.insert(all, plr) end
     for _, plr in ipairs(all) do clearESP(plr) end
-    bodySnapshots = {}
+    _G._avehBody = nil
     pcall(function() fovGui:Destroy() end)
     pcall(function() if gui then gui:Destroy() end end)
 end
 
--- ============================================================
--- СТАРТ
--- ============================================================
-local ok, err = pcall(buildUI)
-if not ok then
-    print("[Aveh] ERROR in buildUI:", err)
-    return
-end
+buildUI()
 updateFovCircle(0)
 addTrack(track, LP.CharacterAdded:Connect(function()
     task.wait(0.1); stopFlyAnim(); updateFovCircle(0)
 end))
-print("[Aveh] loaded OK")
