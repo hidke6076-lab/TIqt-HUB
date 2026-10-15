@@ -1,0 +1,1640 @@
+-- aveh aimbot v12 — delta android
+print("[Aveh] init...")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local SoundService     = game:GetService("SoundService")
+
+local LP = Players.LocalPlayer
+local PG = LP:WaitForChild("PlayerGui")
+local function cam() return workspace.CurrentCamera end
+local function vp()  return cam().ViewportSize end
+local function getChar() return LP.Character end
+local function getHum() local c=getChar() return c and c:FindFirstChildOfClass("Humanoid") end
+local isTouch = UserInputService.TouchEnabled
+
+for _, n in ipairs({"AvehAimbot", "AvehFovGui"}) do
+    local g = PG:FindFirstChild(n); if g then pcall(function() g:Destroy() end) end
+end
+if _G.AvehAimbotCleanup then pcall(_G.AvehAimbotCleanup) end
+pcall(function() RunService:UnbindFromRenderStep("AvehAimLoop") end)
+print("[Aveh] cleanup ok")
+
+local track = {}
+local function addTrack(t, c) table.insert(t, c); return c end
+
+-- ============================================================
+-- КОНФИГ
+-- ============================================================
+local C = {
+    Enabled=false, AlwaysAim=isTouch, Smoothness=0.65, FOV=150,
+    MaxDist=500, DrawFOV=true, AimHeld=false, TeamCheck=true,
+
+    ESP=false, ESPMode="void", ESPHealth=true, ESPBox=false, ESPSkeleton=true,
+
+    Noclip=false, Fly=false, FlySpeed=60, FlyAura=true, FlyAnim=true, FlyTilt=true,
+    FlyAnimR15=616006541, FlyAnimR6=616005863,
+
+    SpeedHack=16, SpeedOn=false,
+
+    MusicId="", MusicVolume=0.5,
+}
+
+local state = { lang="ru", theme="dark", scale=1.00, tab="aim", customColor=nil }
+local offsetFromCenter = Vector2.new(0, 0)
+local miniOffset       = Vector2.new(0, 0)
+
+-- ============================================================
+-- ТЕМЫ
+-- ============================================================
+local THEMES = {
+    dark = {
+        bg=Color3.fromRGB(14,14,22), bg2=Color3.fromRGB(22,22,34),
+        row=Color3.fromRGB(28,28,42),
+        accent=Color3.fromRGB(0,210,255), accent2=Color3.fromRGB(120,90,255),
+        text=Color3.fromRGB(232,232,245), muted=Color3.fromRGB(140,140,168),
+        stroke=Color3.fromRGB(48,48,70), off=Color3.fromRGB(60,60,82),
+        close=Color3.fromRGB(230,70,90), min=Color3.fromRGB(240,175,65),
+        track=Color3.fromRGB(44,44,62), tab_bg=Color3.fromRGB(20,20,32),
+    },
+    light = {
+        bg=Color3.fromRGB(248,248,254), bg2=Color3.fromRGB(238,238,248),
+        row=Color3.fromRGB(226,226,238),
+        accent=Color3.fromRGB(0,130,200), accent2=Color3.fromRGB(120,80,220),
+        text=Color3.fromRGB(26,26,42), muted=Color3.fromRGB(110,110,135),
+        stroke=Color3.fromRGB(202,202,218), off=Color3.fromRGB(180,180,198),
+        close=Color3.fromRGB(220,55,70), min=Color3.fromRGB(240,165,55),
+        track=Color3.fromRGB(206,206,222), tab_bg=Color3.fromRGB(234,234,244),
+    }
+}
+local function parseHex(s)
+    if type(s) ~= "string" then return nil end
+    s = s:gsub("#",""):gsub("0x",""):gsub("0X",""):gsub("%s","")
+    if #s ~= 6 then return nil end
+    local r = tonumber(s:sub(1,2),16); local g = tonumber(s:sub(3,4),16); local b = tonumber(s:sub(5,6),16)
+    if not (r and g and b) then return nil end
+    return Color3.fromRGB(r,g,b)
+end
+local function getAccent()
+    if state.customColor then local c = parseHex(state.customColor); if c then return c end end
+    return THEMES[state.theme].accent
+end
+local function getAccent2()
+    if state.customColor then
+        local c = parseHex(state.customColor)
+        if c then
+            local h, s, v = Color3.toHSV(c)
+            return Color3.fromHSV((h + 0.16) % 1, math.max(s*0.65,0.1), v)
+        end
+    end
+    return THEMES[state.theme].accent2
+end
+
+-- ============================================================
+-- СТРОКИ
+-- ============================================================
+local STR = {
+    ru = {
+        title="AVEH · AIMBOT",
+        tab_aim="Аим", tab_esp="ESP", tab_mov="Движение", tab_music="Музыка", tab_cfg="Настройки",
+        enabled="Включить аимбот", always="Всегда аимить", team_check="Не целиться в союзников",
+        smooth="Плавность", fov="FOV", maxdist="Макс. дистанция",
+        draw_fov="Показывать FOV",
+        section_aim="АИМБОТ", section_info="ИНФО", section_esp="ESP", section_preview="ПРЕДПРОСМОТР",
+        esp_enable="Включить ESP", esp_mode="Режим ESP", esp_health="Health bar",
+        esp_box="Box (рамка)", esp_skel="Skeleton (кости)",
+        section_move="ДВИЖЕНИЕ",
+        noclip="Noclip", fly="Fly (джойстик)", fly_speed="Скорость полёта",
+        fly_aura="Аура полёта", fly_anim="Анимация полёта", fly_tilt="Наклон по направлению",
+        speed="Speedhack",
+        section_music="МУЗЫКА ROBLOX", music_id="ID трека", music_play="▶ Играть",
+        music_pause="⏸ Пауза", music_stop="■ Стоп", music_vol="Громкость",
+        music_hint="Введи числовой ID звука (например 1837879082)",
+        section_lang="ЯЗЫК", section_theme="ТЕМА",
+        section_accent="ЦВЕТ АКЦЕНТА", section_size="РАЗМЕР ИНТЕРФЕЙСА",
+        accent_custom="Свой hex (#RRGGBB)", accent_apply="Применить",
+        wall_check="Wall check: всегда включён",
+        hint="Джойстик ведёт, камера — высота. ◎ — удержание аима.",
+        theme_dark="Тёмная", theme_light="Светлая",
+        lang_ru="Русский", lang_en="English", size_reset="Сброс (1.00)",
+    },
+    en = {
+        title="AVEH · AIMBOT",
+        tab_aim="Aim", tab_esp="ESP", tab_mov="Movement", tab_music="Music", tab_cfg="Settings",
+        enabled="Enable aimbot", always="Always aim", team_check="Ignore teammates",
+        smooth="Smoothness", fov="FOV", maxdist="Max distance",
+        draw_fov="Draw FOV",
+        section_aim="AIMBOT", section_info="INFO", section_esp="ESP", section_preview="PREVIEW",
+        esp_enable="Enable ESP", esp_mode="ESP mode", esp_health="Health bar",
+        esp_box="Box", esp_skel="Skeleton",
+        section_move="MOVEMENT",
+        noclip="Noclip", fly="Fly (joystick)", fly_speed="Fly speed",
+        fly_aura="Fly aura", fly_anim="Fly animation", fly_tilt="Tilt by direction",
+        speed="Speedhack",
+        section_music="ROBLOX MUSIC", music_id="Track ID", music_play="▶ Play",
+        music_pause="⏸ Pause", music_stop="■ Stop", music_vol="Volume",
+        music_hint="Enter numeric sound ID (e.g. 1837879082)",
+        section_lang="LANGUAGE", section_theme="THEME",
+        section_accent="ACCENT COLOR", section_size="UI SIZE",
+        accent_custom="Custom hex (#RRGGBB)", accent_apply="Apply",
+        wall_check="Wall check: always on",
+        hint="Joystick drives, camera sets altitude. ◎ = hold aim.",
+        theme_dark="Dark", theme_light="Light",
+        lang_ru="Русский", lang_en="English", size_reset="Reset (1.00)",
+    }
+}
+
+-- ============================================================
+-- FOV CIRCLE
+-- ============================================================
+local fovGui = Instance.new("ScreenGui")
+fovGui.Name = "AvehFovGui"
+fovGui.ResetOnSpawn = false; fovGui.IgnoreGuiInset = true
+fovGui.DisplayOrder = 998; fovGui.Parent = PG
+
+local espLayer = Instance.new("Frame")
+espLayer.Name = "ESPLayer"
+espLayer.Size = UDim2.new(1,0,1,0)
+espLayer.BackgroundTransparency = 1; espLayer.BorderSizePixel = 0
+espLayer.Parent = fovGui
+
+local fovFrame = Instance.new("Frame")
+fovFrame.AnchorPoint = Vector2.new(0.5,0.5)
+fovFrame.Position = UDim2.new(0.5,0,0.5,0)
+fovFrame.BackgroundTransparency = 1
+fovFrame.BorderSizePixel = 0
+fovFrame.Visible = false
+fovFrame.Parent = fovGui
+Instance.new("UICorner", fovFrame).CornerRadius = UDim.new(1,0)
+local fovStroke = Instance.new("UIStroke", fovFrame); fovStroke.Thickness = 1.6
+
+local fovPulse = 0
+local function updateFovCircle(dt)
+    local accent = getAccent()
+    fovPulse = (fovPulse + (dt or 0)*2) % (math.pi*2)
+    local pulse = 1 + math.sin(fovPulse)*0.04
+    fovFrame.Position = UDim2.new(0.5,0,0.5,0)
+    fovFrame.Size = UDim2.new(0, C.FOV*2*pulse, 0, C.FOV*2*pulse)
+    fovFrame.Visible = C.DrawFOV
+    fovStroke.Color = accent
+    fovStroke.Thickness = 1.6 + math.sin(fovPulse)*0.4
+end
+
+print("[Aveh] fov ok")
+
+-- ============================================================
+-- AIM
+-- ============================================================
+local function isEnemy(plr)
+    if not C.TeamCheck then return true end
+    if LP.Team and plr.Team and LP.Team == plr.Team then return false end
+    return true
+end
+
+local function wallClear(targetChar, aimPart)
+    local c = cam()
+    local origin = c.CFrame.Position
+    local dir = aimPart.Position - origin
+    local filter = { c }
+    local mine = getChar()
+    if mine then table.insert(filter, mine) end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.IgnoreWater = true
+    for _ = 1, 6 do
+        params.FilterDescendantsInstances = filter
+        local r = workspace:Raycast(origin, dir, params)
+        if not r then return true end
+        local hit = r.Instance
+        if hit:IsDescendantOf(targetChar) then return true end
+        if hit.Transparency >= 0.9 or not hit.CanCollide then
+            table.insert(filter, hit)
+        else
+            return false
+        end
+    end
+    return false
+end
+
+local lockedTarget, lockLost = nil, 0
+
+local function scoreTarget(part)
+    local c = cam()
+    local pos, on = c:WorldToViewportPoint(part.Position)
+    if not on or pos.Z <= 0 then return nil end
+    local size = vp()
+    return (Vector2.new(pos.X,pos.Y) - Vector2.new(size.X/2,size.Y/2)).Magnitude
+end
+
+local function aimPartOf(char)
+    return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function pickBest()
+    local best, bestDist = nil, C.FOV
+    local myChar = getChar()
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myPos = myRoot and myRoot.Position or cam().CFrame.Position
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP and plr.Character and isEnemy(plr) then
+            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+            local part = aimPartOf(plr.Character)
+            if hum and hum.Health > 0 and part then
+                if (part.Position - myPos).Magnitude <= C.MaxDist then
+                    local d = scoreTarget(part)
+                    if d and d < bestDist and wallClear(plr.Character, part) then
+                        bestDist = d; best = part
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function findTarget()
+    if lockedTarget then
+        local parent = lockedTarget.Parent
+        local hum = parent and parent:FindFirstChildOfClass("Humanoid")
+        if parent and hum and hum.Health > 0 then
+            local d = scoreTarget(lockedTarget)
+            if d and d < C.FOV and wallClear(parent, lockedTarget) then
+                lockLost = 0
+                return lockedTarget
+            end
+        end
+        lockLost = lockLost + 1
+        if lockLost < 6 then return lockedTarget end
+        lockedTarget = nil; lockLost = 0
+    end
+    local best = pickBest()
+    if best then lockedTarget = best; lockLost = 0 end
+    return best
+end
+
+-- ============================================================
+-- ESP MODES
+-- ============================================================
+local espTracked = {}
+local hue = 0
+
+local MODES = {
+    void    = { fill=Color3.fromRGB(0,0,0),       outline=Color3.fromRGB(160,60,255),
+                light=Color3.fromRGB(140,60,255), bright=2.4, range=14,
+                body=Color3.fromRGB(0,0,0),       mat=Enum.Material.SmoothPlastic, fillT=0, outlineT=0 },
+    blood   = { fill=Color3.fromRGB(60,0,0),      outline=Color3.fromRGB(220,25,25),
+                light=Color3.fromRGB(220,25,25), bright=2.2, range=13,
+                body=Color3.fromRGB(40,0,0),      mat=Enum.Material.Neon, fillT=0.05, outlineT=0 },
+    glow    = { fill=Color3.fromRGB(255,245,200), outline=Color3.fromRGB(255,235,140),
+                light=Color3.fromRGB(255,240,180), bright=2.6, range=15,
+                body=Color3.fromRGB(255,240,200), mat=Enum.Material.Neon, fillT=0.35, outlineT=0 },
+    fire    = { fill=Color3.fromRGB(255,90,0),    outline=Color3.fromRGB(255,200,0),
+                light=Color3.fromRGB(255,120,0), bright=2.8, range=16,
+                body=Color3.fromRGB(255,80,0),    mat=Enum.Material.Neon, fillT=0.1, outlineT=0 },
+    frost   = { fill=Color3.fromRGB(180,230,255), outline=Color3.fromRGB(80,180,255),
+                light=Color3.fromRGB(140,210,255), bright=2.4, range=14,
+                body=Color3.fromRGB(180,230,255), mat=Enum.Material.Neon, fillT=0.2, outlineT=0 },
+    toxic   = { fill=Color3.fromRGB(30,180,40),   outline=Color3.fromRGB(150,255,80),
+                light=Color3.fromRGB(60,220,60), bright=2.4, range=14,
+                body=Color3.fromRGB(20,120,30),   mat=Enum.Material.Neon, fillT=0.15, outlineT=0 },
+    plasma  = { fill=Color3.fromRGB(255,50,220),  outline=Color3.fromRGB(255,180,255),
+                light=Color3.fromRGB(255,80,220), bright=2.8, range=16,
+                body=Color3.fromRGB(255,30,200),  mat=Enum.Material.Neon, fillT=0.1, outlineT=0 },
+    galaxy  = { fill=Color3.fromRGB(40,15,90),    outline=Color3.fromRGB(200,80,255),
+                light=Color3.fromRGB(150,60,255), bright=2.6, range=15,
+                body=Color3.fromRGB(25,8,60),     mat=Enum.Material.Neon, fillT=0.05, outlineT=0 },
+    ghost   = { fill=Color3.fromRGB(230,240,255), outline=Color3.fromRGB(200,220,255),
+                light=Color3.fromRGB(220,230,255), bright=1.8, range=12,
+                body=nil, mat=nil, fillT=0.55, outlineT=0.3 },
+    rainbow = { fill=nil, outline=nil, light=nil, bright=2.4, range=14,
+                body=nil, mat=Enum.Material.Neon, fillT=0.15, outlineT=0 },
+    default = { fill=Color3.fromRGB(255,50,50),   outline=Color3.fromRGB(255,255,255),
+                light=Color3.fromRGB(255,60,60), bright=1.6, range=10,
+                body=nil, mat=nil, fillT=0.5, outlineT=0 },
+    gold    = { fill=Color3.fromRGB(255,200,40),  outline=Color3.fromRGB(255,240,180),
+                light=Color3.fromRGB(255,215,90), bright=2.6, range=15,
+                body=Color3.fromRGB(255,200,40),  mat=Enum.Material.Neon, fillT=0.15, outlineT=0 },
+    emerald = { fill=Color3.fromRGB(20,220,140),  outline=Color3.fromRGB(180,255,220),
+                light=Color3.fromRGB(40,240,160), bright=2.4, range=14,
+                body=Color3.fromRGB(15,180,110),  mat=Enum.Material.Neon, fillT=0.1, outlineT=0 },
+    crimson = { fill=Color3.fromRGB(180,20,40),   outline=Color3.fromRGB(255,120,140),
+                light=Color3.fromRGB(220,40,70),  bright=2.4, range=14,
+                body=Color3.fromRGB(140,15,30),   mat=Enum.Material.Neon, fillT=0.1, outlineT=0 },
+    shadow  = { fill=Color3.fromRGB(10,10,20),    outline=Color3.fromRGB(90,90,140),
+                light=Color3.fromRGB(60,60,110),  bright=1.6, range=12,
+                body=Color3.fromRGB(15,15,30),    mat=Enum.Material.SmoothPlastic, fillT=0.15, outlineT=0.4 },
+    lava    = { fill=Color3.fromRGB(200,30,0),    outline=Color3.fromRGB(255,150,30),
+                light=Color3.fromRGB(255,100,20), bright=2.8, range=16,
+                body=Color3.fromRGB(180,25,0),    mat=Enum.Material.Neon, fillT=0.05, outlineT=0 },
+}
+
+local bodySnapshots = {}
+local function snapshotBody(char)
+    if bodySnapshots[char] then return end
+    local snap = {}
+    for _, p in ipairs(char:GetChildren()) do
+        if p:IsA("BasePart") then
+            table.insert(snap, { part=p, color=p.Color, material=p.Material })
+        end
+    end
+    bodySnapshots[char] = snap
+end
+local function restoreBody(char)
+    local snap = bodySnapshots[char]; if not snap then return end
+    for _, e in ipairs(snap) do
+        if e.part and e.part.Parent then
+            pcall(function() e.part.Color = e.color end)
+            pcall(function() e.part.Material = e.material end)
+        end
+    end
+    bodySnapshots[char] = nil
+end
+local function applyBodyMode(char, mode, rainbowCol)
+    local cfg = MODES[mode]
+    if not cfg or not cfg.body then restoreBody(char); return end
+    snapshotBody(char)
+    local col = cfg.body
+    if mode == "rainbow" and rainbowCol then col = rainbowCol end
+    for _, p in ipairs(char:GetChildren()) do
+        if p:IsA("BasePart") then
+            pcall(function()
+                if cfg.mat and p.Material ~= cfg.mat then p.Material = cfg.mat end
+                if col and p.Color ~= col then p.Color = col end
+            end)
+        end
+    end
+end
+local function applyHighlightMode(entry, mode, rainbowCol)
+    local cfg = MODES[mode]; if not cfg then return end
+    local h, l = entry.highlight, entry.light
+    if h and h.Parent then
+        local fill, outline = cfg.fill, cfg.outline
+        if mode == "rainbow" and rainbowCol then
+            fill = rainbowCol
+            outline = rainbowCol:Lerp(Color3.new(1,1,1), 0.45)
+        end
+        h.FillColor = fill; h.OutlineColor = outline
+        h.FillTransparency = cfg.fillT; h.OutlineTransparency = cfg.outlineT
+    end
+    if l and l.Parent then
+        local lc = cfg.light
+        if mode == "rainbow" and rainbowCol then lc = rainbowCol end
+        l.Color = lc; l.Brightness = cfg.bright
+        l.Range = cfg.range; l.Shadows = false
+    end
+end
+
+-- ============================================================
+-- HEALTH BAR
+-- ============================================================
+local function makeHealthBar(hrp)
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "AvehHB"
+    bb.Adornee = hrp
+    bb.Size = UDim2.new(0, 80, 0, 32)
+    bb.StudsOffset = Vector3.new(3.4, 0.6, 0)
+    bb.AlwaysOnTop = true; bb.MaxDistance = 1500; bb.LightInfluence = 0
+    bb.Parent = hrp
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 0, 14)
+    label.BackgroundTransparency = 1
+    label.Text = "100"
+    label.TextColor3 = Color3.fromRGB(255,255,255)
+    label.Font = Enum.Font.GothamBold; label.TextSize = 12
+    label.TextStrokeTransparency = 0.2
+    label.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+    label.Parent = bb
+
+    local barBg = Instance.new("Frame")
+    barBg.Size = UDim2.new(1, 0, 0, 8)
+    barBg.Position = UDim2.new(0, 0, 0, 18)
+    barBg.BackgroundColor3 = Color3.fromRGB(14,14,20)
+    barBg.BorderSizePixel = 0
+    barBg.Parent = bb
+    Instance.new("UICorner", barBg).CornerRadius = UDim.new(1,0)
+    local s = Instance.new("UIStroke", barBg); s.Color = Color3.fromRGB(0,0,0); s.Thickness = 1.2
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(1,-2,1,-2); fill.Position = UDim2.new(0,1,0,1)
+    fill.BackgroundColor3 = Color3.fromRGB(60,220,90)
+    fill.BorderSizePixel = 0; fill.Parent = barBg
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1,0)
+
+    return { billboard=bb, fill=fill, label=label }
+end
+local function updateHealthBar(hb, hum)
+    if not hb or not hb.billboard or not hb.billboard.Parent then return end
+    local maxH = math.max(hum.MaxHealth, 1)
+    local ratio = math.clamp(hum.Health/maxH, 0, 1)
+    hb.fill.Size = UDim2.new(ratio, -2, 1, -2)
+    local col
+    if ratio > 0.5 then
+        col = Color3.fromRGB(60,220,90):Lerp(Color3.fromRGB(255,210,60), (1-ratio)*2)
+    else
+        col = Color3.fromRGB(255,210,60):Lerp(Color3.fromRGB(230,40,40), 1-ratio*2)
+    end
+    hb.fill.BackgroundColor3 = col
+    hb.label.Text = tostring(math.floor(hum.Health + 0.5)) .. " / " .. tostring(math.floor(maxH))
+end
+
+-- ============================================================
+-- BOX / SKELETON
+-- ============================================================
+local SKELETON_R15 = {
+    {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+    {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+    {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+    {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},{"LeftLowerLeg","LeftFoot"},
+    {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},{"RightLowerLeg","RightFoot"},
+}
+local SKELETON_R6 = {
+    {"Head","Torso"},{"Torso","Left Arm"},{"Torso","Right Arm"},
+    {"Torso","Left Leg"},{"Torso","Right Leg"},
+}
+local function mkLineFrame()
+    local f = Instance.new("Frame")
+    f.AnchorPoint = Vector2.new(0.5,0.5)
+    f.BorderSizePixel = 0
+    f.Visible = false
+    f.Parent = espLayer
+    return f
+end
+local function setLine(f, a, b, color, th)
+    local d = b - a
+    f.Size = UDim2.fromOffset(math.max(d.Magnitude, 1), th)
+    f.Position = UDim2.fromOffset((a.X+b.X)/2, (a.Y+b.Y)/2)
+    f.Rotation = math.deg(math.atan2(d.Y, d.X))
+    f.BackgroundColor3 = color
+    f.Visible = true
+end
+local function mkBoxFrame()
+    local f = Instance.new("Frame")
+    f.BackgroundTransparency = 1; f.BorderSizePixel = 0
+    f.Visible = false; f.Parent = espLayer
+    local s = Instance.new("UIStroke", f)
+    s.Thickness = 1.6
+    return f, s
+end
+local function hideOverlay(entry)
+    if entry.box then entry.box.Visible = false end
+    if entry.skel then for _, l in pairs(entry.skel) do l.Visible = false end end
+end
+local function updateOverlay(entry, char, hrp, color)
+    if not C.ESPBox and not C.ESPSkeleton then hideOverlay(entry); return end
+    local c = cam()
+    local top = c:WorldToViewportPoint(hrp.Position + Vector3.new(0, 2.9, 0))
+    local bot = c:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
+    if top.Z <= 0 or bot.Z <= 0 then hideOverlay(entry); return end
+
+    if C.ESPBox then
+        if not entry.box then entry.box, entry.boxStroke = mkBoxFrame() end
+        local h = math.abs(bot.Y - top.Y)
+        local w = h * 0.55
+        entry.box.Position = UDim2.fromOffset(top.X - w/2, math.min(top.Y, bot.Y))
+        entry.box.Size = UDim2.fromOffset(w, h)
+        entry.boxStroke.Color = color
+        entry.box.Visible = true
+    elseif entry.box then
+        entry.box.Visible = false
+    end
+
+    if C.ESPSkeleton then
+        entry.skel = entry.skel or {}
+        local conns = char:FindFirstChild("UpperTorso") and SKELETON_R15 or SKELETON_R6
+        for i, pair in ipairs(conns) do
+            local p1, p2 = char:FindFirstChild(pair[1]), char:FindFirstChild(pair[2])
+            local line = entry.skel[i]
+            local shown = false
+            if p1 and p2 then
+                local s1 = c:WorldToViewportPoint(p1.Position)
+                local s2 = c:WorldToViewportPoint(p2.Position)
+                if s1.Z > 0 and s2.Z > 0 then
+                    if not line then line = mkLineFrame(); entry.skel[i] = line end
+                    setLine(line, Vector2.new(s1.X, s1.Y), Vector2.new(s2.X, s2.Y), color, 1.6)
+                    shown = true
+                end
+            end
+            if not shown and line then line.Visible = false end
+        end
+    elseif entry.skel then
+        for _, l in pairs(entry.skel) do l.Visible = false end
+    end
+end
+
+-- ============================================================
+-- ESP УПРАВЛЕНИЕ
+-- ============================================================
+local function safeDestroy(o) if o then pcall(function() o:Destroy() end) end end
+local function clearESP(plr)
+    local e = espTracked[plr]; if not e then return end
+    if e.char then restoreBody(e.char) end
+    safeDestroy(e.highlight); safeDestroy(e.light)
+    if e.health then safeDestroy(e.health.billboard) end
+    safeDestroy(e.box)
+    if e.skel then for _, l in pairs(e.skel) do safeDestroy(l) end end
+    espTracked[plr] = nil
+end
+local function ensureESP(plr, char, hrp)
+    local entry = espTracked[plr]
+    if entry and entry.char ~= char then clearESP(plr); entry = nil end
+    if not entry then entry = { char = char }; espTracked[plr] = entry end
+
+    if not (entry.highlight and entry.highlight.Parent == char) then
+        safeDestroy(entry.highlight)
+        local h = Instance.new("Highlight")
+        h.Name = "AvehHL"
+        h.Adornee = char
+        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        h.Parent = char
+        entry.highlight = h
+    end
+    if not (entry.light and entry.light.Parent == hrp) then
+        safeDestroy(entry.light)
+        local l = Instance.new("PointLight")
+        l.Name = "AvehLight"
+        l.Parent = hrp
+        entry.light = l
+    end
+    return entry
+end
+local function updateOne(plr, rainbowCol, accent)
+    local char = plr.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not (char and hum and hrp) or hum.Health <= 0 then
+        if espTracked[plr] then clearESP(plr) end
+        return
+    end
+    local entry = ensureESP(plr, char, hrp)
+    applyHighlightMode(entry, C.ESPMode, rainbowCol)
+    applyBodyMode(char, C.ESPMode, rainbowCol)
+    if C.ESPMode == "glow" and entry.light then
+        entry.light.Brightness = 2.2 + math.sin(hue*math.pi*6)*0.6
+    end
+    if C.ESPHealth then
+        if not (entry.health and entry.health.billboard.Parent == hrp) then
+            if entry.health then safeDestroy(entry.health.billboard) end
+            entry.health = makeHealthBar(hrp)
+        end
+        updateHealthBar(entry.health, hum)
+    elseif entry.health then
+        safeDestroy(entry.health.billboard)
+        entry.health = nil
+    end
+    local color = (C.ESPMode == "rainbow") and rainbowCol or accent
+    updateOverlay(entry, char, hrp, color)
+end
+local function updateESP(dt)
+    local toRemove = nil
+    for plr in pairs(espTracked) do
+        if not plr.Parent then
+            toRemove = toRemove or {}
+            table.insert(toRemove, plr)
+        end
+    end
+    if toRemove then for _, plr in ipairs(toRemove) do clearESP(plr) end end
+
+    if not C.ESP then
+        local all = {}
+        for plr in pairs(espTracked) do table.insert(all, plr) end
+        for _, plr in ipairs(all) do clearESP(plr) end
+        return
+    end
+    hue = (hue + dt*0.22) % 1
+    local rainbowCol = Color3.fromHSV(hue, 0.9, 1)
+    local accent = getAccent()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then pcall(updateOne, plr, rainbowCol, accent) end
+    end
+end
+addTrack(track, Players.PlayerRemoving:Connect(function(plr) clearESP(plr) end))
+
+print("[Aveh] esp ok")
+
+-- ============================================================
+-- NOCLIP
+-- ============================================================
+addTrack(track, RunService.Stepped:Connect(function()
+    if not C.Noclip then return end
+    local char = getChar(); if not char then return end
+    for _, p in ipairs(char:GetDescendants()) do
+        if p:IsA("BasePart") and p.CanCollide then
+            pcall(function() p.CanCollide = false end)
+        end
+    end
+end))
+
+-- ============================================================
+-- FLY
+-- ============================================================
+local flyBV = nil
+local function ensureFlyBV()
+    local root = getChar() and getChar():FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    if flyBV and flyBV.Parent == root then return end
+    if flyBV then flyBV:Destroy() end
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.MaxForce = Vector3.new(1e5,1e5,1e5)
+    flyBV.Velocity = Vector3.new(0,0,0)
+    flyBV.Parent = root
+end
+local function stopFlyBV() if flyBV then flyBV:Destroy(); flyBV = nil end end
+
+local function clearFlyAura()
+    local a = _G._avehAura; if not a then return end
+    for _, obj in ipairs({a.trail, a.particles, a.light, a.a0, a.a1, a.hl}) do
+        pcall(function() if obj and obj.Parent then obj:Destroy() end end)
+    end
+    _G._avehAura = nil
+end
+local function ensureFlyAura()
+    local char = getChar(); if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart"); if not root then return end
+    if _G._avehAura and _G._avehAura.root == root and _G._avehAura.root.Parent then return end
+    clearFlyAura()
+    local a0 = Instance.new("Attachment"); a0.Position = Vector3.new(0.85,0.4,1); a0.Parent = root
+    local a1 = Instance.new("Attachment"); a1.Position = Vector3.new(-0.85,0.4,1); a1.Parent = root
+    local trail = Instance.new("Trail")
+    trail.Attachment0=a0; trail.Attachment1=a1
+    trail.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255,245,120)),
+        ColorSequenceKeypoint.new(0.4, Color3.fromRGB(120,200,255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(60,110,255)),
+    })
+    trail.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,0.1),
+        NumberSequenceKeypoint.new(0.6,0.5),
+        NumberSequenceKeypoint.new(1,1),
+    })
+    trail.Lifetime=0.55; trail.MinLength=0
+    trail.WidthScale = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,1.4), NumberSequenceKeypoint.new(1,0),
+    })
+    trail.FaceCamera=true; trail.LightEmission=1; trail.LightInfluence=0
+    trail.Parent = root
+    local particles = Instance.new("ParticleEmitter")
+    particles.Rate=90; particles.Lifetime=NumberRange.new(0.4,0.9)
+    particles.Speed=NumberRange.new(18,34); particles.SpreadAngle=Vector2.new(25,25)
+    particles.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255,240,90)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(140,210,255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(80,140,255)),
+    })
+    particles.Size = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,0.65), NumberSequenceKeypoint.new(1,0),
+    })
+    particles.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0,0.15), NumberSequenceKeypoint.new(1,1),
+    })
+    particles.LightEmission=1; particles.LightInfluence=0
+    particles.Rotation=NumberRange.new(0,360)
+    particles.RotSpeed=NumberRange.new(-120,120)
+    particles.Parent = root
+    local light = Instance.new("PointLight")
+    light.Color=Color3.fromRGB(255,220,110); light.Brightness=3.2
+    light.Range=16; light.Shadows=false; light.Parent = root
+    local hl = Instance.new("Highlight")
+    hl.Adornee = char
+    hl.FillColor=Color3.fromRGB(255,240,120); hl.FillTransparency=0.85
+    hl.OutlineColor=Color3.fromRGB(120,200,255); hl.OutlineTransparency=0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = char
+    _G._avehAura = { root=root, trail=trail, particles=particles, light=light, a0=a0, a1=a1, hl=hl }
+end
+
+local flyAnimTrack, flyAnimChar, flyAnimLoading = nil, nil, false
+local function stopFlyAnim()
+    if flyAnimTrack then
+        pcall(function() flyAnimTrack:Stop(0.15) end)
+        flyAnimTrack = nil
+    end
+    flyAnimChar = nil
+end
+local function tryPlayAnim(hum, animId)
+    local anim = Instance.new("Animation")
+    anim.AnimationId = "rbxassetid://" .. tostring(animId)
+    local animator = hum:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = hum
+    end
+    local ok, trackA = pcall(function() return animator:LoadAnimation(anim) end)
+    if ok and trackA then
+        trackA.Priority = Enum.AnimationPriority.Action4
+        trackA.Looped = true
+        pcall(function() trackA:Play(0.1) end)
+        task.wait(0.2)
+        if trackA.IsPlaying then return trackA end
+    end
+    local ok2, trackB = pcall(function() return hum:LoadAnimation(anim) end)
+    if ok2 and trackB then
+        trackB.Priority = Enum.AnimationPriority.Action4
+        trackB.Looped = true
+        pcall(function() trackB:Play(0.1) end)
+        task.wait(0.2)
+        if trackB.IsPlaying then return trackB end
+    end
+    return nil
+end
+local function ensureFlyAnim()
+    local char = getChar(); if not char then stopFlyAnim(); return end
+    if flyAnimLoading then return end
+    if flyAnimChar == char and flyAnimTrack and flyAnimTrack.IsPlaying then return end
+    stopFlyAnim()
+    local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+    local animId = char:FindFirstChild("UpperTorso") and C.FlyAnimR15 or C.FlyAnimR6
+    if not animId then return end
+    flyAnimLoading = true
+    task.spawn(function()
+        local ok, trackA = pcall(tryPlayAnim, hum, animId)
+        if ok and trackA then
+            if C.Fly and C.FlyAnim then
+                flyAnimTrack = trackA
+                flyAnimChar = char
+            else
+                pcall(function() trackA:Stop(0.1) end)
+            end
+        end
+        task.wait(1)
+        flyAnimLoading = false
+    end)
+end
+local function applyFlyTilt(dt)
+    if not C.FlyTilt or not C.Fly then return end
+    local char = getChar(); if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not root or not hum then return end
+    local look = cam().CFrame.LookVector
+    local flat = Vector3.new(look.X, 0, look.Z)
+    if flat.Magnitude < 0.01 then return end
+    flat = flat.Unit
+    local targetYaw = math.atan2(-flat.X, -flat.Z)
+    local pitch = math.asin(math.clamp(look.Y, -1, 1))
+    local targetPitch = math.clamp(pitch * 0.5, -0.6, 0.6)
+    hum.AutoRotate = false
+    local cur = root.CFrame
+    local desired = CFrame.new(cur.Position)
+        * CFrame.Angles(0, targetYaw, 0) * CFrame.Angles(targetPitch, 0, 0)
+    root.CFrame = cur:Lerp(desired, math.clamp(dt * 6, 0, 1))
+end
+
+-- ============================================================
+-- MUSIC
+-- ============================================================
+local musicSound = nil
+local function ensureMusicSound()
+    if musicSound and musicSound.Parent then return musicSound end
+    musicSound = Instance.new("Sound")
+    musicSound.Name = "AvehMusic"
+    musicSound.Looped = true
+    musicSound.Volume = C.MusicVolume
+    musicSound.Parent = SoundService
+    return musicSound
+end
+local function musicPlay()
+    local s = ensureMusicSound()
+    if not C.MusicId or C.MusicId == "" then return end
+    s.SoundId = "rbxassetid://" .. tostring(C.MusicId)
+    s.Volume = C.MusicVolume
+    pcall(function() s:Play() end)
+end
+local function musicPause()
+    if musicSound then pcall(function() musicSound:Pause() end) end
+end
+local function musicStop()
+    if musicSound then pcall(function() musicSound:Stop() end) end
+end
+
+-- ============================================================
+-- HEARTBEAT
+-- ============================================================
+addTrack(track, RunService.Heartbeat:Connect(function(dt)
+    if C.Fly then
+        ensureFlyBV()
+        if C.FlyAura then ensureFlyAura() else clearFlyAura() end
+        if C.FlyAnim then ensureFlyAnim() else stopFlyAnim() end
+        applyFlyTilt(dt)
+        if flyBV then
+            local hum = getHum(); local c = cam()
+            if hum and c then
+                local md = hum.MoveDirection
+                local mag = md.Magnitude
+                local lookY = c.CFrame.LookVector.Y
+                local vel = md * C.FlySpeed
+                vel = vel + Vector3.new(0, lookY * C.FlySpeed * mag, 0)
+                flyBV.Velocity = flyBV.Velocity:Lerp(vel, math.clamp(dt*12, 0, 1))
+            end
+        end
+    else
+        stopFlyBV(); clearFlyAura(); stopFlyAnim()
+        local hum = getHum()
+        if hum then hum.AutoRotate = true end
+    end
+    local hum = getHum()
+    if hum and C.SpeedOn and C.SpeedHack ~= hum.WalkSpeed then
+        hum.WalkSpeed = C.SpeedHack
+    end
+end))
+
+print("[Aveh] fly/music ok")
+
+-- ============================================================
+-- UI
+-- ============================================================
+local gui, aimBtnRef = nil, nil
+local previewRef = nil
+local uiConnections = {}
+
+local function destroyUI()
+    for _, c in ipairs(uiConnections) do pcall(function() c:Disconnect() end) end
+    uiConnections = {}
+    if gui then pcall(function() gui:Destroy() end); gui = nil end
+    aimBtnRef = nil; previewRef = nil
+end
+
+local function buildPreviewFigure(parent)
+    local model = Instance.new("Model")
+    model.Name = "PreviewFigure"
+    local baseColor = Color3.fromRGB(200,200,215)
+    local function mk(name, size, cf)
+        local p = Instance.new("Part")
+        p.Name = name; p.Size = size; p.CFrame = cf
+        p.Color = baseColor; p.Anchored = true; p.CanCollide = false
+        p.Parent = model
+        return p
+    end
+    mk("Head", Vector3.new(0.7,0.7,0.7), CFrame.new(0,2.05,0))
+    mk("UpperTorso", Vector3.new(1,0.9,0.55), CFrame.new(0,1.25,0))
+    mk("LowerTorso", Vector3.new(1,0.6,0.55), CFrame.new(0,0.55,0))
+    mk("LeftUpperArm", Vector3.new(0.45,0.75,0.45), CFrame.new(0.75,1.4,0))
+    mk("LeftLowerArm", Vector3.new(0.4,0.7,0.4), CFrame.new(0.75,0.6,0))
+    mk("RightUpperArm", Vector3.new(0.45,0.75,0.45), CFrame.new(-0.75,1.4,0))
+    mk("RightLowerArm", Vector3.new(0.4,0.7,0.4), CFrame.new(-0.75,0.6,0))
+    mk("LeftUpperLeg", Vector3.new(0.5,0.9,0.5), CFrame.new(0.3,0,0))
+    mk("LeftLowerLeg", Vector3.new(0.45,0.85,0.45), CFrame.new(0.3,-0.9,0))
+    mk("RightUpperLeg", Vector3.new(0.5,0.9,0.5), CFrame.new(-0.3,0,0))
+    mk("RightLowerLeg", Vector3.new(0.45,0.85,0.45), CFrame.new(-0.3,-0.9,0))
+    model.PrimaryPart = model.UpperTorso
+    model.Parent = parent
+    return model
+end
+
+local function applyPreviewMode(model, mode)
+    local oldH = model:FindFirstChildOfClass("Highlight")
+    if oldH then oldH:Destroy() end
+    local oldL = model:FindFirstChild("AvehPreviewLight")
+    if oldL then oldL:Destroy() end
+    local cfg = MODES[mode]
+    if not cfg then return end
+    for _, p in ipairs(model:GetChildren()) do
+        if p:IsA("BasePart") then
+            p.Color = Color3.fromRGB(200,200,215)
+            p.Material = Enum.Material.SmoothPlastic
+        end
+    end
+    local h = Instance.new("Highlight")
+    h.Adornee = model
+    h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    h.FillColor = cfg.fill or Color3.fromRGB(255,50,50)
+    h.OutlineColor = cfg.outline or Color3.fromRGB(255,255,255)
+    h.FillTransparency = cfg.fillT
+    h.OutlineTransparency = cfg.outlineT
+    h.Parent = model
+    if cfg.body then
+        for _, p in ipairs(model:GetChildren()) do
+            if p:IsA("BasePart") then
+                p.Color = cfg.body
+                p.Material = cfg.mat or Enum.Material.SmoothPlastic
+            end
+        end
+    end
+    local l = Instance.new("PointLight")
+    l.Name = "AvehPreviewLight"
+    l.Color = cfg.light or Color3.fromRGB(255,60,60)
+    l.Brightness = cfg.bright
+    l.Range = cfg.range
+    l.Shadows = false
+    l.Parent = model.PrimaryPart or model
+end
+
+local function buildUI()
+    destroyUI()
+    C.AimHeld = false
+    local T = THEMES[state.theme]
+    local accent = getAccent()
+    local accent2 = getAccent2()
+    local S = STR[state.lang]
+    local SF = math.clamp(vp().X / 800 * state.scale, 0.55, 2.2)
+
+    gui = Instance.new("ScreenGui")
+    gui.Name = "AvehAimbot"
+    gui.ResetOnSpawn = false; gui.IgnoreGuiInset = true
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = 1000
+    gui.Parent = PG
+
+    local winW = math.clamp(340 * SF, 240, vp().X - 20)
+    local winH = math.clamp(490 * SF, 300, vp().Y - 60)
+
+    local Main = Instance.new("Frame")
+    Main.AnchorPoint = Vector2.new(0.5,0.5)
+    Main.Size = UDim2.new(0, math.floor(winW), 0, math.floor(winH))
+    Main.BackgroundColor3 = T.bg; Main.BorderSizePixel = 0
+    Main.Active = true; Main.ClipsDescendants = true
+    Main.Parent = gui
+    Instance.new("UICorner", Main).CornerRadius = UDim.new(0,12)
+    local stroke = Instance.new("UIStroke", Main)
+    stroke.Color = T.stroke; stroke.Thickness = 1.5
+    local bgGrad = Instance.new("UIGradient")
+    bgGrad.Color = ColorSequence.new(T.bg, T.bg2); bgGrad.Rotation = 90
+    bgGrad.Parent = Main
+    local topAccent = Instance.new("Frame")
+    topAccent.Size = UDim2.new(1,0,0,2)
+    topAccent.BackgroundColor3 = accent; topAccent.BorderSizePixel = 0
+    topAccent.Parent = Main
+    local accentGrad = Instance.new("UIGradient")
+    accentGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, accent),
+        ColorSequenceKeypoint.new(0.5, accent2),
+        ColorSequenceKeypoint.new(1, accent),
+    })
+    accentGrad.Parent = topAccent
+
+    local function applyMainPosition()
+        Main.Position = UDim2.new(0.5, math.floor(offsetFromCenter.X),
+                                   0.5, math.floor(offsetFromCenter.Y))
+    end
+    applyMainPosition()
+
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, -110*SF, 0, 42*SF)
+    Title.Position = UDim2.new(0, 16*SF, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.Text = S.title; Title.TextColor3 = accent
+    Title.Font = Enum.Font.GothamBold
+    Title.TextSize = math.floor(14*SF)
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = Main
+
+    local bSize = math.floor(32*SF)
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Size = UDim2.new(0,bSize,0,bSize)
+    CloseBtn.Position = UDim2.new(1, -bSize - math.floor(8*SF), 0, math.floor(7*SF))
+    CloseBtn.BackgroundColor3 = T.close
+    CloseBtn.Text = "✕"; CloseBtn.TextColor3 = Color3.new(1,1,1)
+    CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = math.floor(13*SF)
+    CloseBtn.AutoButtonColor = false; CloseBtn.Parent = Main
+    Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0,8)
+
+    local MinBtn = Instance.new("TextButton")
+    MinBtn.Size = UDim2.new(0,bSize,0,bSize)
+    MinBtn.Position = UDim2.new(1, -bSize*2 - math.floor(14*SF), 0, math.floor(7*SF))
+    MinBtn.BackgroundColor3 = T.min
+    MinBtn.Text = "–"; MinBtn.TextColor3 = Color3.new(1,1,1)
+    MinBtn.Font = Enum.Font.GothamBold; MinBtn.TextSize = math.floor(18*SF)
+    MinBtn.AutoButtonColor = false; MinBtn.Parent = Main
+    Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0,8)
+
+    local TabBar = Instance.new("Frame")
+    TabBar.Size = UDim2.new(1, -24*SF, 0, math.floor(32*SF))
+    TabBar.Position = UDim2.new(0, 12*SF, 0, math.floor(48*SF))
+    TabBar.BackgroundColor3 = T.tab_bg; TabBar.BorderSizePixel = 0
+    TabBar.Parent = Main
+    Instance.new("UICorner", TabBar).CornerRadius = UDim.new(0,7)
+    local tl = Instance.new("UIListLayout", TabBar)
+    tl.FillDirection = Enum.FillDirection.Horizontal
+    tl.Padding = UDim.new(0,3); tl.SortOrder = Enum.SortOrder.LayoutOrder
+    local tp = Instance.new("UIPadding", TabBar)
+    tp.PaddingLeft = UDim.new(0,3); tp.PaddingRight = UDim.new(0,3)
+    tp.PaddingTop = UDim.new(0,3); tp.PaddingBottom = UDim.new(0,3)
+
+    local tabs = {
+        {id="aim", label=S.tab_aim}, {id="esp", label=S.tab_esp},
+        {id="mov", label=S.tab_mov}, {id="music", label=S.tab_music},
+        {id="cfg", label=S.tab_cfg},
+    }
+    for _, t in ipairs(tabs) do
+        local on = state.tab == t.id
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1/#tabs, -3, 1, 0)
+        b.BackgroundColor3 = on and accent or T.row
+        b.Text = t.label
+        b.TextColor3 = on and Color3.new(1,1,1) or T.text
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = math.floor(10*SF)
+        b.AutoButtonColor = false
+        b.Parent = TabBar
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0,5)
+        if on then
+            local g = Instance.new("UIGradient")
+            g.Color = ColorSequence.new(accent, accent2); g.Rotation = 45; g.Parent = b
+        end
+        b.MouseButton1Click:Connect(function()
+            if state.tab ~= t.id then state.tab = t.id; buildUI() end
+        end)
+    end
+
+    local Scroll = Instance.new("ScrollingFrame")
+    Scroll.Size = UDim2.new(1, -24*SF, 1, -math.floor(92*SF))
+    Scroll.Position = UDim2.new(0, 12*SF, 0, math.floor(86*SF))
+    Scroll.BackgroundTransparency = 1; Scroll.BorderSizePixel = 0
+    Scroll.ScrollBarThickness = 4; Scroll.ScrollBarImageColor3 = accent
+    Scroll.CanvasSize = UDim2.new(0,0,0,0)
+    Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    Scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+    Scroll.Parent = Main
+    local Lay = Instance.new("UIListLayout", Scroll)
+    Lay.Padding = UDim.new(0,6); Lay.SortOrder = Enum.SortOrder.LayoutOrder
+    local sPad = Instance.new("UIPadding", Scroll)
+    sPad.PaddingBottom = UDim.new(0,10)
+
+    local function section(text)
+        local f = Instance.new("Frame")
+        f.Size = UDim2.new(1,0,0, math.floor(26*SF))
+        f.BackgroundTransparency = 1; f.Parent = Scroll
+        local bar = Instance.new("Frame")
+        bar.Size = UDim2.new(0,3,0, math.floor(14*SF))
+        bar.Position = UDim2.new(0,2,0.5,-math.floor(7*SF))
+        bar.BackgroundColor3 = accent; bar.Parent = f
+        Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1,-14,1,0); l.Position = UDim2.new(0, 12*SF, 0, 0)
+        l.BackgroundTransparency = 1; l.Text = text; l.TextColor3 = accent
+        l.Font = Enum.Font.GothamBold; l.TextSize = math.floor(11*SF)
+        l.TextXAlignment = Enum.TextXAlignment.Left; l.Parent = f
+    end
+
+    local function toggle(name, initial, callback)
+        local row = Instance.new("TextButton")
+        row.Size = UDim2.new(1,0,0, math.floor(40*SF))
+        row.BackgroundColor3 = T.row; row.Text = ""
+        row.AutoButtonColor = false; row.Parent = Scroll
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0,8)
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, -80*SF, 1, 0)
+        label.Position = UDim2.new(0, 16*SF, 0, 0)
+        label.BackgroundTransparency = 1; label.Text = name
+        label.TextColor3 = T.text; label.Font = Enum.Font.Gotham
+        label.TextSize = math.floor(14*SF)
+        label.TextXAlignment = Enum.TextXAlignment.Left; label.Parent = row
+        local tW, tH = math.floor(42*SF), math.floor(22*SF)
+        local tf = Instance.new("Frame")
+        tf.Size = UDim2.new(0,tW,0,tH)
+        tf.Position = UDim2.new(1, -(tW + math.floor(12*SF)), 0.5, -math.floor(tH/2))
+        tf.BackgroundColor3 = initial and accent or T.off; tf.Parent = row
+        Instance.new("UICorner", tf).CornerRadius = UDim.new(1,0)
+        local tg = Instance.new("UIGradient")
+        tg.Color = ColorSequence.new(accent, accent2); tg.Rotation = 45; tg.Parent = tf
+        local kS = math.floor(18*SF)
+        local knob = Instance.new("Frame")
+        knob.Size = UDim2.new(0,kS,0,kS)
+        knob.BackgroundColor3 = Color3.new(1,1,1); knob.Parent = tf
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1,0)
+        local s = initial
+        local function render()
+            tf.BackgroundColor3 = s and accent or T.off; tg.Enabled = s
+            local pad = math.floor(2*SF)
+            if s then
+                knob.Position = UDim2.new(1, -(kS+pad), 0.5, -math.floor(kS/2))
+            else
+                knob.Position = UDim2.new(0, pad, 0.5, -math.floor(kS/2))
+            end
+        end
+        render()
+        row.MouseButton1Click:Connect(function() s = not s; render(); pcall(callback, s) end)
+    end
+
+    local function slider(name, min, max, initial, fmt, callback, onRelease)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1,0,0, math.floor(58*SF))
+        row.BackgroundColor3 = T.row; row.Parent = Scroll
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0,8)
+        local top = Instance.new("TextLabel")
+        top.Size = UDim2.new(1, -95*SF, 0, 22*SF)
+        top.Position = UDim2.new(0, 16*SF, 0, 6*SF)
+        top.BackgroundTransparency = 1; top.Text = name
+        top.TextColor3 = T.text; top.Font = Enum.Font.Gotham
+        top.TextSize = math.floor(14*SF)
+        top.TextXAlignment = Enum.TextXAlignment.Left; top.Parent = row
+        local val = Instance.new("TextLabel")
+        val.Size = UDim2.new(0, 85*SF, 0, 22*SF)
+        val.Position = UDim2.new(1, -95*SF, 0, 6*SF)
+        val.BackgroundTransparency = 1
+        val.Text = fmt and string.format(fmt, initial) or tostring(initial)
+        val.TextColor3 = accent; val.Font = Enum.Font.GothamBold
+        val.TextSize = math.floor(14*SF)
+        val.TextXAlignment = Enum.TextXAlignment.Right; val.Parent = row
+        local bar = Instance.new("Frame")
+        bar.Size = UDim2.new(1, -32*SF, 0, math.floor(6*SF))
+        bar.Position = UDim2.new(0, 16*SF, 1, -math.floor(18*SF))
+        bar.BackgroundColor3 = T.track; bar.Parent = row
+        Instance.new("UICorner", bar).CornerRadius = UDim.new(1,0)
+        local fill = Instance.new("Frame")
+        local rel0 = (initial-min)/math.max(max-min,0.0001)
+        fill.Size = UDim2.new(rel0,0,1,0); fill.BackgroundColor3 = accent
+        fill.Parent = bar
+        Instance.new("UICorner", fill).CornerRadius = UDim.new(1,0)
+        local fg = Instance.new("UIGradient")
+        fg.Color = ColorSequence.new(accent, accent2); fg.Parent = fill
+        local ta = Instance.new("TextButton")
+        ta.Size = UDim2.new(1,0,0, math.floor(30*SF))
+        ta.Position = UDim2.new(0,0,1,-math.floor(30*SF))
+        ta.BackgroundTransparency = 1; ta.Text = ""
+        ta.AutoButtonColor = false; ta.Parent = row
+        local dragging = false
+        local function update(x)
+            local w = math.max(bar.AbsoluteSize.X, 1)
+            local rel = math.clamp((x - bar.AbsolutePosition.X)/w, 0, 1)
+            local v = min + (max-min)*rel
+            fill.Size = UDim2.new(rel,0,1,0)
+            val.Text = fmt and string.format(fmt, v) or string.format("%.2f", v)
+            pcall(callback, v)
+        end
+        ta.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch
+            or i.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true; update(i.Position.X)
+            end
+        end)
+        ta.InputChanged:Connect(function(i)
+            if dragging and (i.UserInputType == Enum.UserInputType.Touch
+            or i.UserInputType == Enum.UserInputType.MouseMovement) then update(i.Position.X) end
+        end)
+        addTrack(uiConnections, UserInputService.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch
+            or i.UserInputType == Enum.UserInputType.MouseButton1 then
+                if dragging then dragging=false; if onRelease then pcall(onRelease) end end
+            end
+        end))
+    end
+
+    local function note(text)
+        local l = Instance.new("TextLabel")
+        l.Size = UDim2.new(1,0,0, math.floor(18*SF))
+        l.BackgroundTransparency = 1; l.Text = text
+        l.TextColor3 = T.muted; l.Font = Enum.Font.Gotham
+        l.TextSize = math.floor(11*SF)
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextWrapped = true; l.Parent = Scroll
+    end
+
+    local function picker(options, current, callback)
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1,0,0, math.floor(38*SF))
+        row.BackgroundColor3 = T.row; row.Parent = Scroll
+        Instance.new("UICorner", row).CornerRadius = UDim.new(0,8)
+        local l = Instance.new("UIListLayout", row)
+        l.FillDirection = Enum.FillDirection.Horizontal
+        l.Padding = UDim.new(0,3); l.SortOrder = Enum.SortOrder.LayoutOrder
+        l.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        l.VerticalAlignment = Enum.VerticalAlignment.Center
+        local p = Instance.new("UIPadding", row)
+        p.PaddingLeft = UDim.new(0,3); p.PaddingRight = UDim.new(0,3)
+        p.PaddingTop = UDim.new(0,3); p.PaddingBottom = UDim.new(0,3)
+        for _, opt in ipairs(options) do
+            local on = opt.value == current
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1/#options, -3, 1, 0)
+            b.BackgroundColor3 = on and accent or T.off
+            b.Text = opt.label
+            b.TextColor3 = on and Color3.new(1,1,1) or T.text
+            b.Font = Enum.Font.GothamBold
+            b.TextSize = math.floor(11*SF); b.AutoButtonColor = false
+            b.Parent = row
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0,5)
+            if on then
+                local g = Instance.new("UIGradient")
+                g.Color = ColorSequence.new(accent, accent2); g.Rotation = 45; g.Parent = b
+            end
+            b.MouseButton1Click:Connect(function() if not on then callback(opt.value) end end)
+        end
+    end
+
+    local function button(name, callback)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1,0,0, math.floor(38*SF))
+        b.BackgroundColor3 = T.row; b.Text = name
+        b.TextColor3 = T.text; b.Font = Enum.Font.GothamBold
+        b.TextSize = math.floor(13*SF); b.AutoButtonColor = false
+        b.Parent = Scroll
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
+        b.MouseButton1Click:Connect(function() pcall(callback) end)
+    end
+
+    local function textInput(placeholder, initial, callback)
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.new(1,0,0, math.floor(38*SF))
+        box.BackgroundColor3 = T.row
+        box.PlaceholderText = placeholder
+        box.Text = initial or ""
+        box.PlaceholderColor3 = T.muted
+        box.TextColor3 = T.text
+        box.Font = Enum.Font.Gotham
+        box.TextSize = math.floor(13*SF)
+        box.ClearTextOnFocus = false
+        box.Parent = Scroll
+        Instance.new("UICorner", box).CornerRadius = UDim.new(0,8)
+        box.FocusLost:Connect(function() pcall(callback, box.Text) end)
+        return box
+    end
+
+    if state.tab == "aim" then
+        section(S.section_aim)
+        toggle(S.enabled, C.Enabled, function(s)
+            C.Enabled = s
+            if aimBtnRef and aimBtnRef.Parent then aimBtnRef.Visible = C.Enabled and not C.AlwaysAim end
+        end)
+        toggle(S.always, C.AlwaysAim, function(s)
+            C.AlwaysAim = s
+            if aimBtnRef and aimBtnRef.Parent then aimBtnRef.Visible = C.Enabled and not s end
+        end)
+        toggle(S.team_check, C.TeamCheck, function(s) C.TeamCheck = s; lockedTarget = nil end)
+        slider(S.smooth, 0.01, 0.95, C.Smoothness, "%.2f", function(v) C.Smoothness = v end)
+        slider(S.fov, 20, 500, C.FOV, "%.0f", function(v) C.FOV = v; updateFovCircle(0) end)
+        slider(S.maxdist, 50, 2000, C.MaxDist, "%.0f", function(v) C.MaxDist = v end)
+        toggle(S.draw_fov, C.DrawFOV, function(s) C.DrawFOV = s; updateFovCircle(0) end)
+        section(S.section_info)
+        note(S.wall_check); note(S.hint)
+
+    elseif state.tab == "esp" then
+        section(S.section_esp)
+        toggle(S.esp_enable, C.ESP, function(s) C.ESP = s end)
+        toggle(S.esp_health, C.ESPHealth, function(s) C.ESPHealth = s end)
+        toggle(S.esp_box, C.ESPBox, function(s) C.ESPBox = s end)
+        toggle(S.esp_skel, C.ESPSkeleton, function(s) C.ESPSkeleton = s end)
+        section(S.esp_mode)
+        local function setMode(v)
+            C.ESPMode = v
+            local all = {}
+            for plr in pairs(espTracked) do table.insert(all, plr) end
+            for _, plr in ipairs(all) do clearESP(plr) end
+            buildUI()
+        end
+        picker({
+            {value="void", label="Void"}, {value="blood", label="Blood"},
+            {value="glow", label="Glow"}, {value="fire", label="Fire"},
+        }, C.ESPMode, setMode)
+        picker({
+            {value="frost", label="Frost"}, {value="toxic", label="Toxic"},
+            {value="plasma", label="Plasma"}, {value="galaxy", label="Galaxy"},
+        }, C.ESPMode, setMode)
+        picker({
+            {value="gold", label="Gold"}, {value="emerald", label="Emerald"},
+            {value="crimson", label="Crimson"}, {value="lava", label="Lava"},
+        }, C.ESPMode, setMode)
+        picker({
+            {value="shadow", label="Shadow"}, {value="ghost", label="Ghost"},
+            {value="rainbow", label="Rainbow"}, {value="default", label="Default"},
+        }, C.ESPMode, setMode)
+
+        section(S.section_preview)
+        local vf = Instance.new("ViewportFrame")
+        vf.Size = UDim2.new(1, 0, 0, math.floor(220 * SF))
+        vf.BackgroundColor3 = T.bg2
+        vf.BorderSizePixel = 0
+        vf.Ambient = Color3.fromRGB(200,200,220)
+        vf.LightColor = Color3.fromRGB(255,255,255)
+        vf.LightDirection = Vector3.new(-0.4,-1,-0.6)
+        vf.Parent = Scroll
+        Instance.new("UICorner", vf).CornerRadius = UDim.new(0,10)
+        local vfStroke = Instance.new("UIStroke", vf)
+        vfStroke.Color = accent; vfStroke.Thickness = 1.5
+
+        local model = buildPreviewFigure(vf)
+        applyPreviewMode(model, C.ESPMode)
+
+        local previewCam = Instance.new("Camera")
+        previewCam.Parent = vf
+        vf.CurrentCamera = previewCam
+        previewCam.CFrame = CFrame.new(Vector3.new(0.5, 1.2, -5.5), Vector3.new(0, 0.7, 0))
+
+        previewRef = { model = model, camera = previewCam, vf = vf }
+
+    elseif state.tab == "mov" then
+        section(S.section_move)
+        toggle(S.noclip, C.Noclip, function(s) C.Noclip = s end)
+        toggle(S.fly, C.Fly, function(s) C.Fly = s end)
+        toggle(S.fly_aura, C.FlyAura, function(s) C.FlyAura = s end)
+        toggle(S.fly_anim, C.FlyAnim, function(s) C.FlyAnim = s end)
+        toggle(S.fly_tilt, C.FlyTilt, function(s) C.FlyTilt = s end)
+        slider(S.fly_speed, 10, 300, C.FlySpeed, "%.0f", function(v) C.FlySpeed = v end)
+        slider(S.speed, 8, 300, C.SpeedHack, "%.0f", function(v) C.SpeedHack = v; C.SpeedOn = true end)
+
+    elseif state.tab == "music" then
+        section(S.section_music)
+        note(S.music_hint)
+        local idBox = textInput(S.music_id, C.MusicId, function(txt)
+            C.MusicId = tostring(txt):gsub("[^%d]","")
+        end)
+        local btnRow = Instance.new("Frame")
+        btnRow.Size = UDim2.new(1, 0, 0, math.floor(38*SF))
+        btnRow.BackgroundTransparency = 1
+        btnRow.Parent = Scroll
+        local brLay = Instance.new("UIListLayout", btnRow)
+        brLay.FillDirection = Enum.FillDirection.Horizontal
+        brLay.Padding = UDim.new(0,6); brLay.SortOrder = Enum.SortOrder.LayoutOrder
+        local function mb(label, cb)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1/3, -4, 1, 0)
+            b.BackgroundColor3 = accent
+            b.Text = label; b.TextColor3 = Color3.new(1,1,1)
+            b.Font = Enum.Font.GothamBold; b.TextSize = math.floor(12*SF)
+            b.AutoButtonColor = false; b.Parent = btnRow
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+            b.MouseButton1Click:Connect(function()
+                if idBox then
+                    C.MusicId = tostring(idBox.Text):gsub("[^%d]","")
+                end
+                pcall(cb)
+            end)
+        end
+        mb(S.music_play, function() musicPlay() end)
+        mb(S.music_pause, function() musicPause() end)
+        mb(S.music_stop, function() musicStop() end)
+        slider(S.music_vol, 0, 1, C.MusicVolume, "%.2f", function(v)
+            C.MusicVolume = v
+            if musicSound then pcall(function() musicSound.Volume = v end) end
+        end)
+
+    else
+        section(S.section_lang)
+        picker({
+            {value="ru", label=S.lang_ru}, {value="en", label=S.lang_en},
+        }, state.lang, function(v) state.lang = v; buildUI() end)
+        section(S.section_theme)
+        picker({
+            {value="dark", label=S.theme_dark}, {value="light", label=S.theme_light},
+        }, state.theme, function(v) state.theme = v; buildUI() end)
+        section(S.section_accent)
+        local swatchRow = Instance.new("Frame")
+        swatchRow.Size = UDim2.new(1,0,0, math.floor(64*SF))
+        swatchRow.BackgroundColor3 = T.row; swatchRow.Parent = Scroll
+        Instance.new("UICorner", swatchRow).CornerRadius = UDim.new(0,8)
+        local gl = Instance.new("UIGridLayout", swatchRow)
+        gl.CellSize = UDim2.new(0.115,0,0.4,0)
+        gl.CellPadding = UDim2.new(0.008,0,0.06,0)
+        gl.SortOrder = Enum.SortOrder.LayoutOrder
+        local sp = Instance.new("UIPadding", swatchRow)
+        sp.PaddingLeft = UDim.new(0,6); sp.PaddingRight = UDim.new(0,6)
+        sp.PaddingTop = UDim.new(0,4); sp.PaddingBottom = UDim.new(0,4)
+        local presets = {
+            "#00D2FF", "#8C5AFF", "#E83C50", "#3CD37C",
+            "#FFA53C", "#FF64C8", "#FFD700", "#F0F0F5",
+        }
+        for _, hex in ipairs(presets) do
+            local c = parseHex(hex)
+            local on = state.customColor and state.customColor:upper() == hex:upper()
+            local b = Instance.new("TextButton")
+            b.BackgroundColor3 = c; b.Text = ""; b.AutoButtonColor = false
+            b.Parent = swatchRow
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+            if on then
+                local s = Instance.new("UIStroke", b)
+                s.Color = Color3.new(1,1,1); s.Thickness = 2
+            end
+            b.MouseButton1Click:Connect(function() state.customColor = hex; buildUI() end)
+        end
+        local resetB = Instance.new("TextButton")
+        resetB.BackgroundColor3 = T.off; resetB.Text = "×"
+        resetB.TextColor3 = T.text; resetB.Font = Enum.Font.GothamBold
+        resetB.TextSize = math.floor(16*SF); resetB.AutoButtonColor = false
+        resetB.Parent = swatchRow
+        Instance.new("UICorner", resetB).CornerRadius = UDim.new(0,6)
+        resetB.MouseButton1Click:Connect(function() state.customColor = nil; buildUI() end)
+
+        local customRow = Instance.new("Frame")
+        customRow.Size = UDim2.new(1,0,0, math.floor(44*SF))
+        customRow.BackgroundColor3 = T.row; customRow.Parent = Scroll
+        Instance.new("UICorner", customRow).CornerRadius = UDim.new(0,8)
+        local box = Instance.new("TextBox")
+        box.Size = UDim2.new(0.6, -8, 0, math.floor(32*SF))
+        box.Position = UDim2.new(0, 8, 0.5, -math.floor(16*SF))
+        box.BackgroundColor3 = T.bg
+        box.Text = state.customColor or ""
+        box.PlaceholderText = S.accent_custom
+        box.PlaceholderColor3 = T.muted
+        box.TextColor3 = T.text; box.Font = Enum.Font.Gotham
+        box.TextSize = math.floor(12*SF); box.ClearTextOnFocus = false
+        box.Parent = customRow
+        Instance.new("UICorner", box).CornerRadius = UDim.new(0,6)
+        local apply = Instance.new("TextButton")
+        apply.Size = UDim2.new(0.4, -8, 0, math.floor(32*SF))
+        apply.Position = UDim2.new(0.6, 0, 0.5, -math.floor(16*SF))
+        apply.BackgroundColor3 = accent; apply.Text = S.accent_apply
+        apply.TextColor3 = Color3.new(1,1,1); apply.Font = Enum.Font.GothamBold
+        apply.TextSize = math.floor(12*SF); apply.AutoButtonColor = false
+        apply.Parent = customRow
+        Instance.new("UICorner", apply).CornerRadius = UDim.new(0,6)
+        apply.MouseButton1Click:Connect(function()
+            if parseHex(box.Text) then
+                state.customColor = "#" .. box.Text:gsub("#",""):gsub("0x",""):gsub("0X","")
+                buildUI()
+            else
+                box.TextColor3 = Color3.fromRGB(230,70,90)
+                task.delay(1, function()
+                    if box and box.Parent then box.TextColor3 = T.text end
+                end)
+            end
+        end)
+
+        section(S.section_size)
+        slider(S.section_size, 0.5, 1.6, state.scale, "%.2f",
+            function(v) state.scale = v end, function() buildUI() end)
+        button(S.size_reset, function() state.scale = 1.00; buildUI() end)
+    end
+
+    do
+        local dragging, dragStart, startOffset = false, nil, nil
+        Title.InputBegan:Connect(function(i)
+            if i.UserInputType ~= Enum.UserInputType.Touch
+            and i.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+            dragging, dragStart, startOffset = true, i.Position, offsetFromCenter
+        end)
+        Title.InputChanged:Connect(function(i)
+            if not dragging then return end
+            if i.UserInputType ~= Enum.UserInputType.Touch
+            and i.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+            local d = i.Position - dragStart
+            local sz = vp()
+            local maxX = sz.X/2 - winW/2 - 8
+            local maxY = sz.Y/2 - winH/2 - 8
+            offsetFromCenter = Vector2.new(
+                math.clamp(startOffset.X+d.X, -maxX, maxX),
+                math.clamp(startOffset.Y+d.Y, -maxY, maxY)
+            )
+            applyMainPosition()
+        end)
+        addTrack(uiConnections, UserInputService.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch
+            or i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+        end))
+    end
+
+    local mS = math.floor(56*SF)
+    local Mini = Instance.new("TextButton")
+    Mini.AnchorPoint = Vector2.new(0.5,0.5)
+    Mini.Size = UDim2.new(0,mS,0,mS)
+    Mini.BackgroundColor3 = T.bg; Mini.Text = "A"
+    Mini.TextColor3 = accent; Mini.Font = Enum.Font.GothamBold
+    Mini.TextSize = math.floor(22*SF); Mini.Visible = false
+    Mini.AutoButtonColor = false; Mini.Parent = gui
+    Instance.new("UICorner", Mini).CornerRadius = UDim.new(1,0)
+    local ms = Instance.new("UIStroke", Mini)
+    ms.Color = accent; ms.Thickness = 1.5
+    local mg = Instance.new("UIGradient")
+    mg.Color = ColorSequence.new(accent, accent2); mg.Rotation = 45; mg.Parent = ms
+
+    local function applyMiniPosition()
+        Mini.Position = UDim2.new(0.5, math.floor(miniOffset.X), 0.5, math.floor(miniOffset.Y))
+    end
+    applyMiniPosition()
+
+    local miniDrag, miniStartOffset, miniStartPos = false, nil, nil
+    Mini.InputBegan:Connect(function(i)
+        if i.UserInputType ~= Enum.UserInputType.Touch
+        and i.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        miniStartOffset = miniOffset; miniStartPos = i.Position; miniDrag = false
+    end)
+    Mini.InputChanged:Connect(function(i)
+        if i.UserInputType ~= Enum.UserInputType.Touch
+        and i.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+        if not miniStartPos then return end
+        local d = i.Position - miniStartPos
+        if d.Magnitude > 6 then miniDrag = true end
+        if miniDrag then
+            local sz = vp(); local r = mS/2
+            miniOffset = Vector2.new(
+                math.clamp(miniStartOffset.X+d.X, -(sz.X/2-r-8), sz.X/2-r-8),
+                math.clamp(miniStartOffset.Y+d.Y, -(sz.Y/2-r-8), sz.Y/2-r-8)
+            )
+            applyMiniPosition()
+        end
+    end)
+    addTrack(uiConnections, UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.Touch
+        or i.UserInputType == Enum.UserInputType.MouseButton1 then
+            task.delay(0.05, function() miniDrag = false; miniStartPos = nil end)
+        end
+    end))
+    Mini.MouseButton1Click:Connect(function()
+        if miniDrag then return end
+        Main.Visible = true; Mini.Visible = false
+    end)
+
+    local aS = math.floor(94*SF)
+    local AimBtn = Instance.new("TextButton")
+    AimBtn.AnchorPoint = Vector2.new(1,1)
+    AimBtn.Size = UDim2.new(0,aS,0,aS)
+    AimBtn.Position = UDim2.new(1, -math.floor(22*SF), 1, -math.floor(28*SF))
+    AimBtn.BackgroundColor3 = accent; AimBtn.BackgroundTransparency = 0.25
+    AimBtn.Text = "◎"; AimBtn.TextColor3 = Color3.new(1,1,1)
+    AimBtn.Font = Enum.Font.GothamBold; AimBtn.TextSize = math.floor(36*SF)
+    AimBtn.AutoButtonColor = false
+    AimBtn.Visible = C.Enabled and not C.AlwaysAim
+    AimBtn.Parent = gui
+    Instance.new("UICorner", AimBtn).CornerRadius = UDim.new(1,0)
+    local aStroke = Instance.new("UIStroke", AimBtn)
+    aStroke.Color = accent; aStroke.Thickness = 2
+    local aGrad = Instance.new("UIGradient")
+    aGrad.Color = ColorSequence.new(accent, accent2)
+    aGrad.Rotation = 45; aGrad.Parent = aStroke
+    aimBtnRef = AimBtn
+
+    local aimInput = nil
+    AimBtn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.Touch
+        or i.UserInputType == Enum.UserInputType.MouseButton1 then
+            aimInput = i
+            C.AimHeld = true; AimBtn.BackgroundTransparency = 0.05
+        end
+    end)
+    addTrack(uiConnections, UserInputService.InputEnded:Connect(function(i)
+        if aimInput and i == aimInput then
+            aimInput = nil
+            C.AimHeld = false; AimBtn.BackgroundTransparency = 0.25
+        end
+    end))
+
+    CloseBtn.MouseButton1Click:Connect(function()
+        if _G.AvehAimbotCleanup then _G.AvehAimbotCleanup() end
+    end)
+    MinBtn.MouseButton1Click:Connect(function()
+        Main.Visible = false; Mini.Visible = true
+    end)
+
+    addTrack(uiConnections, RunService.RenderStepped:Connect(function()
+        local now = vp()
+        if now ~= _G._avehLastVp then
+            _G._avehLastVp = now
+            applyMainPosition(); applyMiniPosition(); updateFovCircle(0)
+        end
+    end))
+end
+
+print("[Aveh] buildUI ok")
+
+-- ============================================================
+-- РЕНДЕР
+-- ============================================================
+addTrack(track, RunService.RenderStepped:Connect(function(dt)
+    pcall(updateFovCircle, dt)
+    pcall(updateESP, dt)
+end))
+
+RunService:BindToRenderStep("AvehAimLoop", Enum.RenderPriority.Camera.Value + 1, function(dt)
+    if not C.Enabled or not (C.AlwaysAim or C.AimHeld) then
+        lockedTarget = nil
+        return
+    end
+    pcall(function()
+        local c = cam(); if not c then return end
+        local target = findTarget()
+        if not target then return end
+        local cf = c.CFrame
+        local desired = CFrame.lookAt(cf.Position, target.Position)
+        local base = math.clamp(C.Smoothness, 0.01, 0.99)
+        local alpha = math.clamp(1 - base ^ (dt*60), 0.04, 1)
+        c.CFrame = cf:Lerp(desired, alpha)
+    end)
+end)
+
+-- ============================================================
+-- CLEANUP
+-- ============================================================
+_G.AvehAimbotCleanup = function()
+    pcall(function() RunService:UnbindFromRenderStep("AvehAimLoop") end)
+    stopFlyBV(); clearFlyAura(); stopFlyAnim()
+    local hum = getHum()
+    if hum then
+        hum.AutoRotate = true
+        hum.WalkSpeed = 16
+        hum.JumpPower = 50
+    end
+    C.SpeedHack = 16; C.SpeedOn = false; C.Enabled = false; C.Fly = false; C.Noclip = false
+    musicStop()
+    if musicSound then pcall(function() musicSound:Destroy() end); musicSound = nil end
+    for _, c in ipairs(track) do pcall(function() c:Disconnect() end) end
+    for _, c in ipairs(uiConnections) do pcall(function() c:Disconnect() end) end
+    local all = {}
+    for plr in pairs(espTracked) do table.insert(all, plr) end
+    for _, plr in ipairs(all) do clearESP(plr) end
+    bodySnapshots = {}
+    pcall(function() fovGui:Destroy() end)
+    pcall(function() if gui then gui:Destroy() end end)
+end
+
+-- ============================================================
+-- СТАРТ
+-- ============================================================
+local ok, err = pcall(buildUI)
+if not ok then
+    print("[Aveh] ERROR in buildUI:", err)
+    return
+end
+updateFovCircle(0)
+addTrack(track, LP.CharacterAdded:Connect(function()
+    task.wait(0.1); stopFlyAnim(); updateFovCircle(0)
+end))
+print("[Aveh] loaded OK")
